@@ -8,7 +8,7 @@ from collections import Counter
 import logging
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 
 logging.basicConfig(level=logging.INFO)
 
@@ -426,6 +426,19 @@ class PokerGame:
 
 poker_game = PokerGame()
 
+
+@app.after_request
+def after_request(response):
+    response.headers['Access-Control-Allow-Origin'] = 'http://localhost:3000'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    if request.method == 'OPTIONS':
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+        response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+        response.headers['Access-Control-Allow-Origin'] = 'http://localhost:3000'
+        response.status_code = 200
+    return response
+
 @app.route('/')
 def hello():
     return 'Hello, Poker!'
@@ -438,6 +451,14 @@ def get_tables():
     ]
     print("Tables fetched:", tables)  # Debugging output
     return jsonify(tables), 200
+
+@app.route('/players', methods=['GET'])
+def get_players():
+    players = [
+        {"name": player.name, "bankroll": player.bankroll, "status": player.status}
+        for player in poker_game.players
+    ]
+    return jsonify(players), 200
 
 @app.route('/create_table', methods=['POST'])
 def create_table():
@@ -492,6 +513,27 @@ def remove_player_from_table():
         return jsonify({'message': 'Player not found'}), 404
     table.remove_player(player)
     return jsonify({'message': f'Player {player_name} removed from table {table_name}'}), 200
+
+@app.route('/sit_down', methods=['POST'])
+def sit_down():
+    data = request.get_json()
+    player_name = data.get('player_name')
+    table_name = data.get('table_name')
+    seat = data.get('seat')
+    buy_in = data.get('buy_in')
+
+    table = next((t for t in poker_game.tables if t.name == table_name), None)
+    if not table:
+        return jsonify({'message': 'Table not found'}), 404
+
+    player = next((p for p in poker_game.players if p.name == player_name), None)
+    if not player:
+        return jsonify({'message': 'Player not found'}), 404
+
+    message, status = player.sit_down(table, seat, buy_in)
+    return jsonify({'message': message}), status
+
+
 
 @app.route('/add_player', methods=['POST'])
 def add_player():
