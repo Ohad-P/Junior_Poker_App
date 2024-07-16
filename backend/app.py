@@ -116,6 +116,12 @@ class Table:
             player.in_game_chips -= self.blinds["antee"]
             self.pot += self.blinds["antee"]
 
+    def distribute_pot(self, winners):
+        split_pot = self.pot // len(winners)
+        for winner in winners:
+            winner.in_game_chips += split_pot
+        self.pot = 0
+
 
 class Player:
     def __init__(self, name, bankroll):
@@ -198,8 +204,7 @@ class PokerGame:
         self.table = Table(name='init_table')
         self.community_cards = []
         self.current_phase = "none"
-        self.pot = 0
-        self.bets = {}
+        self.players = []  # List to store all players
 
     def create_deck(self):
         deck = [rank + suit for rank in RANKS for suit in SUITS]
@@ -209,23 +214,23 @@ class PokerGame:
         self.deck = deck
         self.community_cards = []
         self.current_phase = "none"
-        self.pot = 0
-        self.bets = {}
 
     def add_player(self, name, bankroll):
         player = Player(name, bankroll)
-        self.table.add_player(player)
+        self.players.append(player)  # Add player to the list of all players
         return player
 
     def remove_player(self, name):
-        player = next((p for p in self.table.players if p.name == name), None)
+        player = next((p for p in self.players if p.name == name), None)
         if player:
-            self.table.remove_player(player)
+            self.players.remove(player)
+            for table in player.tables:
+                table.remove_player(player)
             return "Player removed", 200
         return "Player not found", 404
 
     def update_player_chips(self, name, chips):
-        player = next((p for p in self.table.players if p.name == name), None)
+        player = next((p for p in self.players if p.name == name), None)
         if player:
             player.bankroll = chips
             return "Player chips updated", 200
@@ -372,7 +377,7 @@ class PokerGame:
 
         if len(best_players) == 1:
             winner = best_players[0]
-            self.distribute_pot([winner])
+            self.table.distribute_pot([winner])
             return winner, best_hands[winner], best_evaluations[winner]
 
         # Tie-breaking among players with the same best evaluation
@@ -390,26 +395,20 @@ class PokerGame:
         for player in best_players[1:]:
             new_winner = compare_hands(winner, player)
             if new_winner is None:
-                self.distribute_pot(best_players)
+                self.table.distribute_pot(best_players)
                 return "tie", best_hands[best_players[0]], best_evaluations[best_players[0]]
             winner = new_winner
 
-        self.distribute_pot([winner])
+        self.table.distribute_pot([winner])
         return winner, best_hands[winner], best_evaluations[winner]
 
-    def distribute_pot(self, winners):
-        split_pot = self.pot // len(winners)
-        for winner in winners:
-            winner.in_game_chips += split_pot
-        self.pot = 0
-
-    def place_bet(self, player_name, amount):
+    def handle_bet(self, player_name, amount):
         player = next((p for p in self.table.players if p.name == player_name), None)
         if not player:
             return "Player not found", 404
         message, status = player.place_bet(amount)
         if status == 200:
-            self.pot += amount
+            self.table.pot += amount
         return message, status
 
     def player_action(self, player_name, action, amount=0):
@@ -418,17 +417,17 @@ class PokerGame:
             return "Player not found", 404
 
         if action == 'fold':
-            if player_name in self.bets:
-                del self.bets[player_name]
+            if player_name in self.table.bets:
+                del self.table.bets[player_name]
             return f'{player_name} folded', 200
         elif action == 'check':
             return f'{player_name} checked', 200
         elif action == 'call':
             return f'{player_name} called', 200
         elif action == 'raise':
-            return self.place_bet(player_name, amount)
+            return self.handle_bet(player_name, amount)
         elif action == 'all-in':
-            return self.place_bet(player_name, amount)
+            return self.handle_bet(player_name, amount)
 
 poker_game = PokerGame()
 
@@ -439,17 +438,9 @@ def hello():
 @app.route('/tables', methods=['GET'])
 def get_tables():
     tables = [
-        {
-            "name": poker_game.table.name,
-            "max_players": poker_game.table.max_players,
-            "min_buy_in": poker_game.table.min_buy_in,
-            "max_buy_in": poker_game.table.max_buy_in,
-            "players": [
-                {"name": player.name, "bankroll": player.bankroll, "status": player.status}
-                for player in poker_game.table.players
-            ]
-        }
-    ] if poker_game.table.name != 'init_table' else []
+        {"name": table.name, "max_players": table.max_players, "min_buy_in": table.min_buy_in, "max_buy_in": table.max_buy_in, "players": [{"name": player.name, "bankroll": player.bankroll, "status": player.status} for player in table.players]}
+        for table in [poker_game.table] if table.name != 'init_table'
+    ]
     print("Tables fetched:", tables)  # Debugging output
     return jsonify(tables), 200
 
@@ -467,12 +458,17 @@ def add_player_to_table():
     data = request.get_json()
     player_name = data.get('player_name')
     table_name = data.get('table_name')
+    logging.info(f"Attempting to add player {player_name} to table {table_name}")
+    logging.info(f"Current players: {[p.name for p in poker_game.players]}")
     if poker_game.table.name != table_name:
+        logging.error(f"Table {table_name} not found")
         return jsonify({'message': 'Table not found'}), 404
-    player = next((p for p in poker_game.table.players if p.name == player_name), None)
+    player = next((p for p in poker_game.players if p.name == player_name), None)
     if not player:
+        logging.error(f"Player {player_name} not found")
         return jsonify({'message': 'Player not found'}), 404
     poker_game.table.add_player(player)
+    logging.info(f"Player {player_name} added to table {table_name}")
     return jsonify({'message': f'Player {player_name} added to table {table_name}'}), 200
 
 @app.route('/remove_player_from_table', methods=['POST'])
@@ -512,6 +508,8 @@ def add_player():
         return jsonify({'message': 'Invalid player data'}), 400
     try:
         player = poker_game.add_player(name, bankroll)
+        logging.info(f"Player {name} added with bankroll {bankroll}")
+        logging.info(f"Current players: {[p.name for p in poker_game.players]}")
         return jsonify({'message': f'Player {name} added with bankroll {bankroll}'}), 200
     except ValueError as e:
         return jsonify({'message': str(e)}), 400
@@ -578,7 +576,7 @@ def deal_river():
         'winner': winner,
         'winning_hand': winning_hand,
         'hand_evaluation': hand_evaluation,
-        'pot': poker_game.pot
+        'pot': poker_game.table.pot
     })
 
 @app.route('/bet', methods=['POST'])
@@ -598,4 +596,6 @@ def fold():
     return jsonify({'message': message}), status
 
 if __name__ == '__main__':
-    app.run(port=3001)
+    for rule in app.url_map.iter_rules():
+        print(rule)
+    app.run(port=3001, debug=True)

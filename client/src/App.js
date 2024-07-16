@@ -146,6 +146,7 @@ function App() {
     console.log('Adding player to table:', playerName);
     try {
       setLoading(true);
+      console.log(`POST request to ${API_URL}/add_player_to_table with player_name: ${playerName} and table_name: ${selectedTable.name}`);
       const response = await fetch(`${API_URL}/add_player_to_table`, {
         method: 'POST',
         headers: {
@@ -156,7 +157,13 @@ function App() {
       const data = await response.json();
       console.log('Add player to table response:', data);
       if (data.message) {
+        // Refetch the tables to update the UI
         fetchTables();
+        // Update the selectedTable state to include the new player
+        setSelectedTable(prev => ({
+          ...prev,
+          players: [...prev.players, { name: playerName, bankroll: 0, status: "sitting" }]
+        }));
       } else {
         setError(data.message);
       }

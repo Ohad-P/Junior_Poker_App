@@ -36,15 +36,18 @@ class TestPokerApp(unittest.TestCase):
         self.assertEqual(player2.in_game_chips, 80)  # Big blind deducted
         self.assertEqual(table.pot, 30)
 
-    def test_place_bet(self):
+    def test_handle_bet(self):
         table = Table(name="Test Table", min_buy_in=50, max_buy_in=500)
         player1 = Player(name="Alice", bankroll=1000)
         player1.join_table(table)
         player1.sit_down(table, seat=0, buy_in=100)
-        response, status = player1.place_bet(50)
+        poker_game = PokerGame()
+        poker_game.table = table
+        response, status = poker_game.handle_bet(player1.name, 50)
         self.assertEqual(status, 200)
         self.assertEqual(player1.in_game_chips, 50)
         self.assertEqual(player1.bet, 50)
+        self.assertEqual(table.pot, 50)
 
     def test_player_join_and_leave_table(self):
         table = Table(name="Test Table", min_buy_in=50, max_buy_in=500)
@@ -196,14 +199,14 @@ class TestPokerApp(unittest.TestCase):
         poker_game.table = table
         poker_game.create_deck()
         poker_game.deal_cards(2)
-        response, status = poker_game.place_bet(player1.name, 20)
+        response, status = poker_game.handle_bet(player1.name, 20)
         self.assertEqual(status, 200)
         self.assertEqual(player1.in_game_chips, 80)
-        self.assertEqual(poker_game.pot, 20)
-        response, status = poker_game.place_bet(player2.name, 50)
+        self.assertEqual(table.pot, 20)
+        response, status = poker_game.handle_bet(player2.name, 50)
         self.assertEqual(status, 200)
         self.assertEqual(player2.in_game_chips, 50)
-        self.assertEqual(poker_game.pot, 70)
+        self.assertEqual(table.pot, 70)
 
     def test_pot_management(self):
         table = Table(name="Test Table", min_buy_in=50, max_buy_in=500)
@@ -219,32 +222,32 @@ class TestPokerApp(unittest.TestCase):
         poker_game.deal_cards(2)
 
         # Pre-flop betting round
-        poker_game.place_bet(player1.name, 20)
-        poker_game.place_bet(player2.name, 20)
-        self.assertEqual(poker_game.pot, 40)
+        poker_game.handle_bet(player1.name, 20)
+        poker_game.handle_bet(player2.name, 20)
+        self.assertEqual(table.pot, 40)
 
         # Flop
         poker_game.deal_flop()
-        poker_game.place_bet(player1.name, 10)
-        poker_game.place_bet(player2.name, 10)
-        self.assertEqual(poker_game.pot, 60)
+        poker_game.handle_bet(player1.name, 10)
+        poker_game.handle_bet(player2.name, 10)
+        self.assertEqual(table.pot, 60)
 
         # Turn
         poker_game.deal_turn()
-        poker_game.place_bet(player1.name, 10)
-        poker_game.place_bet(player2.name, 10)
-        self.assertEqual(poker_game.pot, 80)
+        poker_game.handle_bet(player1.name, 10)
+        poker_game.handle_bet(player2.name, 10)
+        self.assertEqual(table.pot, 80)
 
         # River
         poker_game.deal_river()
-        poker_game.place_bet(player1.name, 10)
-        poker_game.place_bet(player2.name, 10)
-        self.assertEqual(poker_game.pot, 100)
+        poker_game.handle_bet(player1.name, 10)
+        poker_game.handle_bet(player2.name, 10)
+        self.assertEqual(table.pot, 100)
 
         # Determine the winner
         winner, winning_hand, hand_evaluation = poker_game.determine_winner()
         self.assertIn(winner.name, ["Alice", "Bob", "tie"])
-        self.assertEqual(poker_game.pot, 0)
+        self.assertEqual(table.pot, 0)
 
         # Ensure the winner's in-game chips are updated
         if winner.name == "Alice":
